@@ -29,8 +29,6 @@ jobs:
             matrix:
                 arch: [ amd64, arm64 ]
                 target:
-                    -   { name: laravel-php, tag: '8.3', context: php, php: '8.3' }
-                    -   { name: laravel-php, tag: '8.4', context: php, php: '8.4' }
                     -   { name: laravel-php, tag: '8.5', context: php, php: '8.5' }
                     -   { name: laravel-nginx, tag: latest, context: nginx, php: '' }
         steps:
@@ -110,8 +108,6 @@ jobs:
             fail-fast: false
             matrix:
                 target:
-                    -   { name: laravel-php, tag: '8.3' }
-                    -   { name: laravel-php, tag: '8.4' }
                     -   { name: laravel-php, tag: '8.5' }
                     -   { name: laravel-nginx, tag: latest }
         steps:

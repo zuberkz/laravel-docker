@@ -13,7 +13,7 @@ LABEL org.opencontainers.image.source="https://github.com/zuberkz/laravel-docker
 COPY --from=mlocati/php-extension-installer:2 /usr/bin/install-php-extensions /usr/local/bin/
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
-# git и unzip нужны composer; opcache встроен в ядро только с PHP 8.5
+# git и unzip нужны composer; opcache в PHP 8.5 встроен в ядро, для других версий ставится отдельно
 RUN apk add --no-cache git unzip \
     && install-php-extensions bcmath exif gd intl pcntl pdo_mysql pdo_pgsql zip xdebug \
     && (php -m | grep -q 'Zend OPcache' || install-php-extensions opcache)

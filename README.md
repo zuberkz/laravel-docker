@@ -7,7 +7,7 @@ Docker. Образ повторяет сервер (версия PHP, расши
 
 | Образ | Что внутри |
 |-------|------------|
-| `ghcr.io/zuberkz/laravel-php:8.5` (`8.4`, `8.3`) | PHP-FPM на Alpine: bcmath, exif, gd, intl, pcntl, pdo_mysql, pdo_pgsql, zip, opcache, Xdebug (выключен), composer, git; процессы от uid 1000 |
+| `ghcr.io/zuberkz/laravel-php:8.5` | PHP-FPM на Alpine: bcmath, exif, gd, intl, pcntl, pdo_mysql, pdo_pgsql, zip, opcache, Xdebug (выключен), composer, git; процессы от uid 1000 |
 | `ghcr.io/zuberkz/laravel-nginx:latest` | nginx: фронт-контроллер Laravel, загрузки до 10 МБ, `HTTPS=on` за https-прокси OrbStack |
 
 Образы собираются под amd64 и arm64 (Mac) при каждом пуше в `main` и раз в неделю — с
@@ -106,4 +106,5 @@ docker build -t ghcr.io/zuberkz/laravel-php:8.5 php
 docker build -t ghcr.io/zuberkz/laravel-nginx:latest nginx
 ```
 
-Новая версия PHP — строка в матрице `.github/workflows/build.yml` (`build` и `merge`).
+Только PHP 8.5 — на нём сайты студии и сервер. Другая версия (например, 8.6 при переходе) — строка в
+матрицах `build` и `merge` в `.github/workflows/build.yml`.
