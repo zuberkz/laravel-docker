@@ -1,0 +1,137 @@
+name: "🐳 Образы"
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+    # Раз в неделю — пересборка с обновлениями безопасности базовых образов PHP и nginx
+    schedule:
+        -   cron: '0 3 * * 1'
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    packages: write
+
+env:
+    REGISTRY: ghcr.io/zuberkz
+
+jobs:
+    # Каждая архитектура собирается на своём раннере (arm64 — для Mac): без эмуляции QEMU,
+    # в которой расширения компилируются в разы дольше. Образ сначала проверяется, потом
+    # публикуется по digest; манифест на обе архитектуры собирает job merge.
+    build:
+        name: ${{ matrix.target.name }}:${{ matrix.target.tag }} ${{ matrix.arch }}
+        runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+        strategy:
+            fail-fast: false
+            matrix:
+                arch: [ amd64, arm64 ]
+                target:
+                    -   { name: laravel-php, tag: '8.3', context: php, php: '8.3' }
+                    -   { name: laravel-php, tag: '8.4', context: php, php: '8.4' }
+                    -   { name: laravel-php, tag: '8.5', context: php, php: '8.5' }
+                    -   { name: laravel-nginx, tag: latest, context: nginx, php: '' }
+        steps:
+            -   uses: actions/checkout@v4
+
+            -   uses: docker/setup-buildx-action@v3
+
+            -   name: Сборка для проверки
+                uses: docker/build-push-action@v6
+                with:
+                    context: ${{ matrix.target.context }}
+                    platforms: linux/${{ matrix.arch }}
+                    build-args: PHP_VERSION=${{ matrix.target.php }}
+                    load: true
+                    tags: studio-test
+                    pull: true
+                    cache-from: type=gha,scope=${{ matrix.target.name }}-${{ matrix.target.tag }}-${{ matrix.arch }}
+                    cache-to: type=gha,mode=max,scope=${{ matrix.target.name }}-${{ matrix.target.tag }}-${{ matrix.arch }}
+
+            -   name: Проверка PHP
+                if: matrix.target.context == 'php'
+                run: |
+                    modules=$(docker run --rm studio-test php -m)
+                    for module in bcmath exif gd intl pcntl pdo_mysql pdo_pgsql zip xdebug 'Zend OPcache'; do
+                        echo "$modules" | grep -qx "$module" || { echo "Нет расширения $module"; exit 1; }
+                    done
+                    docker run --rm studio-test php -r 'exit(str_starts_with(PHP_VERSION, "${{ matrix.target.php }}.") ? 0 : 1);'
+                    docker run --rm studio-test php -r 'exit(ini_get("upload_max_filesize") === "10M" && ini_get("xdebug.mode") === "off" ? 0 : 1);'
+                    docker run --rm studio-test composer --version
+                    test "$(docker run --rm studio-test id -u)" = 1000
+                    docker run --rm studio-test php-fpm -t
+
+            -   name: Проверка nginx
+                if: matrix.target.context == 'nginx'
+                run: docker run --rm --add-host php-fpm:127.0.0.1 studio-test nginx -t
+
+            -   name: Вход в GHCR
+                if: github.event_name != 'pull_request'
+                uses: docker/login-action@v3
+                with:
+                    registry: ghcr.io
+                    username: ${{ github.actor }}
+                    password: ${{ secrets.GITHUB_TOKEN }}
+
+            -   name: Публикация по digest
+                id: push
+                if: github.event_name != 'pull_request'
+                uses: docker/build-push-action@v6
+                with:
+                    context: ${{ matrix.target.context }}
+                    platforms: linux/${{ matrix.arch }}
+                    build-args: PHP_VERSION=${{ matrix.target.php }}
+                    outputs: type=image,name=${{ env.REGISTRY }}/${{ matrix.target.name }},push-by-digest=true,name-canonical=true,push=true
+                    cache-from: type=gha,scope=${{ matrix.target.name }}-${{ matrix.target.tag }}-${{ matrix.arch }}
+
+            -   name: Digest для merge
+                if: github.event_name != 'pull_request'
+                run: |
+                    mkdir -p digests
+                    touch "digests/${DIGEST#sha256:}"
+                env:
+                    DIGEST: ${{ steps.push.outputs.digest }}
+
+            -   uses: actions/upload-artifact@v4
+                if: github.event_name != 'pull_request'
+                with:
+                    name: digests-${{ matrix.target.name }}-${{ matrix.target.tag }}-${{ matrix.arch }}
+                    path: digests/*
+                    retention-days: 1
+
+    merge:
+        name: ${{ matrix.target.name }}:${{ matrix.target.tag }}
+        if: github.event_name != 'pull_request'
+        needs: build
+        runs-on: ubuntu-24.04
+        strategy:
+            fail-fast: false
+            matrix:
+                target:
+                    -   { name: laravel-php, tag: '8.3' }
+                    -   { name: laravel-php, tag: '8.4' }
+                    -   { name: laravel-php, tag: '8.5' }
+                    -   { name: laravel-nginx, tag: latest }
+        steps:
+            -   uses: actions/download-artifact@v4
+                with:
+                    pattern: digests-${{ matrix.target.name }}-${{ matrix.target.tag }}-*
+                    path: digests
+                    merge-multiple: true
+
+            -   uses: docker/setup-buildx-action@v3
+
+            -   uses: docker/login-action@v3
+                with:
+                    registry: ghcr.io
+                    username: ${{ github.actor }}
+                    password: ${{ secrets.GITHUB_TOKEN }}
+
+            -   name: Манифест amd64 + arm64
+                working-directory: digests
+                run: |
+                    image="$REGISTRY/${{ matrix.target.name }}"
+                    docker buildx imagetools create -t "$image:${{ matrix.target.tag }}" $(printf "$image@sha256:%s " *)
+                    docker buildx imagetools inspect "$image:${{ matrix.target.tag }}"
